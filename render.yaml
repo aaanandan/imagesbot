@@ -1,0 +1,12 @@
+services:
+  - type: worker
+    name: telegram-image-processor
+    runtime: node
+    plan: free
+    buildCommand: yarn install
+    startCommand: yarn start
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false   # set this in Render Dashboard
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false   # set this in Render Dashboard

@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "main": "app.js",
   "type": "module",
-  "scripts": {
-    "start": "node app.js"
-  },
-  "dependencies": {
+    "scripts": {
+      "start": "node index.js"
+    },
+    "license": "MIT",   
+    "author": "Anand",
+    "keywords": ["telegram", "image", "processor"],
+    "dependencies": {
     "@tensorflow-models/coco-ssd": "^2.2.2",
     "@tensorflow/tfjs-node": "^4.20.0",
     "canvas": "^2.11.2",
