@@ -11,6 +11,11 @@ import Tesseract from "tesseract.js";
 dotenv.config();
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const auth = new google.auth.GoogleAuth({
+  keyFile: "credentials.json",
+  scopes: ["https://www.googleapis.com/auth/drive.file"],
+});
+const drive = google.drive({ version: "v3", auth });
 
 // --- Load ML model once ---
 let cocoModel;
@@ -51,12 +56,7 @@ function formatFileName(date, minute, ocrText, hasPerson) {
 
 // --- Upload to Google Drive ---
 async function uploadToDrive(filePath, newName, uploadFolder) {
-  const auth = new google.auth.GoogleAuth({
-    keyFile: "credentials.json",
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
-  });
-  const drive = google.drive({ version: "v3", auth });
-
+ 
   const res = await drive.files.create({
     requestBody: {
       name: newName,
