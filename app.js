@@ -7,10 +7,14 @@ import * as tf from "@tensorflow/tfjs-node";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createCanvas, loadImage } from "canvas";
 import Tesseract from "tesseract.js";
+import fetch from "node-fetch"; // ✅ required if Node < 18
 
 dotenv.config();
 
+// --- Telegram bot setup ---
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+
+// --- Google Drive setup ---
 const auth = new google.auth.GoogleAuth({
   keyFile: "credentials.json",
   scopes: ["https://www.googleapis.com/auth/drive.file"],
@@ -36,31 +40,47 @@ async function detectPerson(imagePath) {
   ctx.drawImage(img, 0, 0);
   const tensor = tf.browser.fromPixels(canvas);
   const predictions = await mdl.detect(tensor);
-  return predictions.some(p => p.class === "person");
+  return predictions.some((p) => p.class === "person");
 }
 
 // --- OCR largest text block ---
 async function extractLargestText(imagePath) {
-  const { data: { text } } = await Tesseract.recognize(imagePath, "eng");
-  const blocks = text.split("\n").map(t => t.trim()).filter(t => t.length > 0);
+  const {
+    data: { text },
+  } = await Tesseract.recognize(imagePath, "eng");
+  const blocks = text
+    .split("\n")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
   return blocks.sort((a, b) => b.length - a.length)[0] || "unknown";
 }
 
 // --- Rename file ---
 function formatFileName(date, minute, ocrText, hasPerson) {
-  // example: 5sep-08.10am-person
-  const d = date.toLocaleDateString("en-GB", { day: "numeric", month: "short" }).replace(" ", "").toLowerCase();
-  const t = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase().replace(" ", "");
+  const d = date
+    .toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    })
+    .replace(" ", "")
+    .toLowerCase();
+  const t = date
+    .toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toLowerCase()
+    .replace(" ", "");
   return `${d}-${t}${hasPerson ? "-person" : ""}.jpg`;
 }
 
 // --- Upload to Google Drive ---
 async function uploadToDrive(filePath, newName, uploadFolder) {
-
   const res = await drive.files.create({
     requestBody: {
       name: newName,
-      parents: uploadFolder,
+      parents: [uploadFolder], // ✅ must be array
     },
     media: {
       mimeType: "image/jpeg",
@@ -69,66 +89,110 @@ async function uploadToDrive(filePath, newName, uploadFolder) {
   });
 
   const fileId = res.data.id;
-  await drive.permissions.create({ fileId, requestBody: { role: "reader", type: "anyone" } });
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role: "reader", type: "anyone" },
+  });
   return `https://drive.google.com/file/d/${fileId}/view`;
 }
 
 // --- Telegram Bot Handler ---
 bot.on("photo", async (msg) => {
-  
-  const { chatId, batchFolder:folder, localPaths } = await processImageBatch(bot, msg);
-  const uploadFolder = createFolder(`${Date.now()}`,process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
+  try {
+    const { chatId, batchFolder: folder, localPaths } = await processImageBatch(
+      bot,
+      msg
+    );
 
-  localPaths.forEach(async (localPath) => {
-    try {
-      const hasPerson = await detectPerson(localPath);
-      const ocrText = await extractLargestText(localPath);
-  
-      const parsedDate = parseDateTimeFromText(ocrText) || new Date(); // fallback to system time
-      const newName = formatFileName(parsedDate, parsedDate.getMinutes(), ocrText, hasPerson);
+    // create Drive folder
+    const uploadFolder = await createFolder(
+      `${Date.now()}`,
+      process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID
+    );
 
-      const renamedPath = path.join(folder, newName);
-      await fs.rename(newName, renamedPath);
-  
-      const driveLink = await uploadToDrive(renamedPath, newName);
-      
-    } catch (err) {
-      console.error(err);
-      bot.sendMessage(chatId, "❌ Error processing image");
+    for (const localPath of localPaths) {
+      try {
+        const hasPerson = await detectPerson(localPath);
+        const ocrText = await extractLargestText(localPath);
+
+        const parsedDate = parseDateTimeFromText(ocrText) || new Date();
+        const newName = formatFileName(
+          parsedDate,
+          parsedDate.getMinutes(),
+          ocrText,
+          hasPerson
+        );
+
+        const renamedPath = path.join(folder, newName);
+        await fs.rename(localPath, renamedPath); // ✅ fixed rename
+
+        const driveLink = await uploadToDrive(
+          renamedPath,
+          newName,
+          uploadFolder
+        );
+        await bot.sendMessage(
+          chatId,
+          `✅ Processed: *${newName}*\n🔗 [View on Drive](${driveLink})`,
+          { parse_mode: "Markdown" }
+        );
+      } catch (err) {
+        console.error(err);
+        await bot.sendMessage(chatId, "❌ Error processing image");
+      }
     }
 
-  })
-  
-  const driveLink = `https://drive.google.com/drive/folders/${uploadFolder}`;
-  bot.sendMessage(chatId, `✅ Processed: *${localPaths}*\n🔗 [View on Drive](${driveLink})`, { parse_mode: "Markdown" });
-  deleteFolder(folder)
+    const driveLink = `https://drive.google.com/drive/folders/${uploadFolder}`;
+    await bot.sendMessage(chatId, `📂 All images uploaded: ${driveLink}`);
+
+    // cleanup local
+    await deleteFolder(folder);
+  } catch (err) {
+    console.error("Batch error:", err);
+  }
 });
 
+// --- Date parsing from OCR ---
 function parseDateTimeFromText(text) {
-  // Normalize text
   const clean = text.toLowerCase().replace(/\s+/g, " ");
-
-  // Regex for patterns like "5 sep 8:10am" or "05/09 08:10"
-  const dateRegex = /(\d{1,2})(?:st|nd|rd|th)?[\/\-\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)?[a-z]*[\/\-\s]?(\d{2,4})?/;
+  const dateRegex =
+    /(\d{1,2})(?:st|nd|rd|th)?[\/\-\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)?[a-z]*[\/\-\s]?(\d{2,4})?/;
   const timeRegex = /(\d{1,2})(?::(\d{2}))?\s?(am|pm)?/;
 
   const dateMatch = clean.match(dateRegex);
   const timeMatch = clean.match(timeRegex);
 
-  let day = 1, month = 0, year = new Date().getFullYear(); // defaults
-  let hour = 0, minute = 0;
+  let day = 1,
+    month = 0,
+    year = new Date().getFullYear();
+  let hour = 0,
+    minute = 0;
 
   if (dateMatch) {
     day = parseInt(dateMatch[1], 10);
 
     if (dateMatch[2]) {
-      const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec"];
-      month = months.indexOf(dateMatch[2].slice(0,3));
+      const months = [
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "sept",
+        "oct",
+        "nov",
+        "dec",
+      ];
+      month = months.indexOf(dateMatch[2].slice(0, 3));
       if (month < 0) month = 0;
     }
     if (dateMatch[3]) {
       year = parseInt(dateMatch[3], 10);
-      if (year < 100) year += 2000; // handle "24" → "2024"
+      if (year < 100) year += 2000;
     }
   }
 
@@ -142,6 +206,7 @@ function parseDateTimeFromText(text) {
   return new Date(year, month, day, hour, minute);
 }
 
+// --- Create Google Drive folder ---
 async function createFolder(name, parentId = null) {
   const fileMetadata = {
     name,
@@ -156,14 +221,11 @@ async function createFolder(name, parentId = null) {
   return folder.data.id;
 }
 
+// --- Process incoming Telegram images ---
 async function processImageBatch(bot, msg) {
   const chatId = msg.chat.id;
-
-  // Each "photo" array contains multiple sizes of the same image.
-  // We'll take the highest resolution version for each photo.
   const photos = msg.photo || [];
 
-  // Create a batch folder for this chat
   const batchFolder = path.join("downloads", String(chatId), String(Date.now()));
   await fs.ensureDir(batchFolder);
 
@@ -187,6 +249,7 @@ async function processImageBatch(bot, msg) {
   return { chatId, batchFolder, localPaths };
 }
 
+// --- Delete local folder ---
 async function deleteFolder(folderPath) {
   try {
     await fs.remove(folderPath);
