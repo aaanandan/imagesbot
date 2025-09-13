@@ -95,7 +95,12 @@ bot.on("photo", async (msg) => {
     const ocrText = await extractLargestText(localPath);
 
     const now = new Date();
-    const newName = formatFileName(now, now.getMinutes(), ocrText, hasPerson);
+    // const newName = formatFileName(now, now.getMinutes(), ocrText, hasPerson);
+
+    // Parse OCR text → datetime
+    const parsedDate = parseDateTimeFromText(ocrText) || new Date(); // fallback to system time
+    const newName = formatFileName(parsedDate, parsedDate.getMinutes(), ocrText, hasPerson);
+
 
     const renamedPath = path.join(folder, newName);
     await fs.rename(localPath, renamedPath);
@@ -108,3 +113,43 @@ bot.on("photo", async (msg) => {
     bot.sendMessage(chatId, "❌ Error processing image");
   }
 });
+
+
+function parseDateTimeFromText(text) {
+  // Normalize text
+  const clean = text.toLowerCase().replace(/\s+/g, " ");
+
+  // Regex for patterns like "5 sep 8:10am" or "05/09 08:10"
+  const dateRegex = /(\d{1,2})(?:st|nd|rd|th)?[\/\-\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)?[a-z]*[\/\-\s]?(\d{2,4})?/;
+  const timeRegex = /(\d{1,2})(?::(\d{2}))?\s?(am|pm)?/;
+
+  const dateMatch = clean.match(dateRegex);
+  const timeMatch = clean.match(timeRegex);
+
+  let day = 1, month = 0, year = new Date().getFullYear(); // defaults
+  let hour = 0, minute = 0;
+
+  if (dateMatch) {
+    day = parseInt(dateMatch[1], 10);
+
+    if (dateMatch[2]) {
+      const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec"];
+      month = months.indexOf(dateMatch[2].slice(0,3));
+      if (month < 0) month = 0;
+    }
+    if (dateMatch[3]) {
+      year = parseInt(dateMatch[3], 10);
+      if (year < 100) year += 2000; // handle "24" → "2024"
+    }
+  }
+
+  if (timeMatch) {
+    hour = parseInt(timeMatch[1], 10);
+    minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+    if (timeMatch[3] === "pm" && hour < 12) hour += 12;
+    if (timeMatch[3] === "am" && hour === 12) hour = 0;
+  }
+
+  return new Date(year, month, day, hour, minute);
+}
+
