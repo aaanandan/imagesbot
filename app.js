@@ -113,19 +113,14 @@ bot.on("photo", async (msg) => {
     for (const localPath of localPaths) {
       try {
         const hasPerson = await detectPerson(localPath);
-        const ocrText = await extractLargestText(localPath);
-
-        const parsedDate = parseDateTimeFromText(ocrText) || new Date();
-        const newName = formatFileName(
-          parsedDate,
-          parsedDate.getMinutes(),
-          ocrText,
-          hasPerson
-        );
-
-        const renamedPath = path.join(folder, newName);
-        await fs.rename(localPath, renamedPath); // ✅ fixed rename
-
+        const ocrText = await extractLargestText(localPath);       
+        textDate=parseDateTimeFromText(ocrText) 
+        if(textDate){
+          const { day, month, year, hour, minute} = textDate;
+          const newName = `${hour}.${minute} ${day}${month} ${year}-${hasPerson}`;
+          const renamedPath = path.join(folder, newName);
+          await fs.rename(localPath, renamedPath); // ✅ fixed rename
+        }
         const driveLink = await uploadToDrive(
           renamedPath,
           newName,
@@ -153,58 +148,62 @@ bot.on("photo", async (msg) => {
 });
 
 // --- Date parsing from OCR ---
-function parseDateTimeFromText(text) {
-  const clean = text.toLowerCase().replace(/\s+/g, " ");
-  const dateRegex =
-    /(\d{1,2})(?:st|nd|rd|th)?[\/\-\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)?[a-z]*[\/\-\s]?(\d{2,4})?/;
-  const timeRegex = /(\d{1,2})(?::(\d{2}))?\s?(am|pm)?/;
+function parseDateTimeFromText(text) { 
+  if (!text) return null;
 
-  const dateMatch = clean.match(dateRegex);
-  const timeMatch = clean.match(timeRegex);
+  // normalize
+  let clean = String(text).toLowerCase().replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
 
-  let day = 1,
-    month = 0,
-    year = new Date().getFullYear();
-  let hour = 0,
-    minute = 0;
+  // OCR fixes *between digits*
+  clean = clean.replace(/(\d)[oO](\d)/g, "$10$2").replace(/(\d)[lI](\d)/g, "$11$2");
 
-  if (dateMatch) {
-    day = parseInt(dateMatch[1], 10);
+  const monthMap = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+  };
 
-    if (dateMatch[2]) {
-      const months = [
-        "jan",
-        "feb",
-        "mar",
-        "apr",
-        "may",
-        "jun",
-        "jul",
-        "aug",
-        "sep",
-        "sept",
-        "oct",
-        "nov",
-        "dec",
-      ];
-      month = months.indexOf(dateMatch[2].slice(0, 3));
-      if (month < 0) month = 0;
-    }
-    if (dateMatch[3]) {
-      year = parseInt(dateMatch[3], 10);
-      if (year < 100) year += 2000;
-    }
+  // 1) textual date + time
+  const textualRe = /(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s*)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[,\s]+(\d{2,4}))?(?:[,\s\-@]*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+  const m1 = clean.match(textualRe);
+  if (m1) {
+    const day = parseInt(m1[1], 10);
+    const monKey = m1[2].slice(0, 3).toLowerCase();
+    const month = monthMap[monKey] ?? null;   // only from text
+    const year = m1[3] ? parseInt(m1[3], 10) : null;
+    let hour = m1[4] ? parseInt(m1[4], 10) : 0;
+    const minute = m1[5] ? parseInt(m1[5], 10) : 0;
+    const ampm = (m1[6] || "").toLowerCase();
+    if (ampm === "pm" && hour < 12) hour += 12;
+    if (ampm === "am" && hour === 12) hour = 0;
+    return { day, month, year, hour, minute };
   }
 
-  if (timeMatch) {
-    hour = parseInt(timeMatch[1], 10);
-    minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-    if (timeMatch[3] === "pm" && hour < 12) hour += 12;
-    if (timeMatch[3] === "am" && hour === 12) hour = 0;
+  // 2) numeric date dd/mm[/yyyy] or dd-mm-yyyy or dd.mm.yyyy
+  const numericDateRe = /(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?/;
+  const m2 = clean.match(numericDateRe);
+  if (m2) {
+    const day = parseInt(m2[1], 10);
+    const month = parseInt(m2[2], 10) - 1; // numeric month from text
+    const year = m2[3] ? parseInt(m2[3], 10) : null;
+    return { day, month, year, hour: 0, minute: 0 };
   }
 
-  return new Date(year, month, day, hour, minute);
+  // 3) time-only
+  const timeOnlyRe = /(\d{1,2}):(\d{2})\s*(am|pm)?/i;
+  const timeOnlyAlt = /(\d{1,2})\s*(am|pm)/i;
+  const m3 = clean.match(timeOnlyRe) || clean.match(timeOnlyAlt);
+  if (m3) {
+    let hour = parseInt(m3[1], 10);
+    const minute = m3[2] ? parseInt(m3[2], 10) : 0;
+    const ampm = (m3[3] || "").toLowerCase();
+    if (ampm === "pm" && hour < 12) hour += 12;
+    if (ampm === "am" && hour === 12) hour = 0;
+    return { day: null, month: null, year: null, hour, minute };
+  }
+
+  return null;
 }
+
 
 // --- Create Google Drive folder ---
 async function createFolder(name, parentId = null) {
