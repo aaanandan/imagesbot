@@ -56,7 +56,7 @@ function formatFileName(date, minute, ocrText, hasPerson) {
 
 // --- Upload to Google Drive ---
 async function uploadToDrive(filePath, newName, uploadFolder) {
- 
+
   const res = await drive.files.create({
     requestBody: {
       name: newName,
@@ -101,9 +101,8 @@ bot.on("photo", async (msg) => {
   
   const driveLink = `https://drive.google.com/drive/folders/${uploadFolder}`;
   bot.sendMessage(chatId, `✅ Processed: *${localPaths}*\n🔗 [View on Drive](${driveLink})`, { parse_mode: "Markdown" });
-  
+  deleteFolder(folder)
 });
-
 
 function parseDateTimeFromText(text) {
   // Normalize text
@@ -157,7 +156,6 @@ async function createFolder(name, parentId = null) {
   return folder.data.id;
 }
 
-
 async function processImageBatch(bot, msg) {
   const chatId = msg.chat.id;
 
@@ -187,4 +185,13 @@ async function processImageBatch(bot, msg) {
 
   console.log(`Downloaded ${localPaths.length} images for chat ${chatId}`);
   return { chatId, batchFolder, localPaths };
+}
+
+async function deleteFolder(folderPath) {
+  try {
+    await fs.remove(folderPath);
+    console.log(`Deleted folder: ${folderPath}`);
+  } catch (err) {
+    console.error(`Error deleting folder ${folderPath}:`, err);
+  }
 }
