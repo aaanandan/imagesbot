@@ -50,7 +50,7 @@ function formatFileName(date, minute, ocrText, hasPerson) {
 }
 
 // --- Upload to Google Drive ---
-async function uploadToDrive(filePath, newName) {
+async function uploadToDrive(filePath, newName, uploadFolder) {
   const auth = new google.auth.GoogleAuth({
     keyFile: "credentials.json",
     scopes: ["https://www.googleapis.com/auth/drive.file"],
@@ -60,7 +60,7 @@ async function uploadToDrive(filePath, newName) {
   const res = await drive.files.create({
     requestBody: {
       name: newName,
-      parents: [process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID],
+      parents: uploadFolder,
     },
     media: {
       mimeType: "image/jpeg",
@@ -75,43 +75,33 @@ async function uploadToDrive(filePath, newName) {
 
 // --- Telegram Bot Handler ---
 bot.on("photo", async (msg) => {
-  const chatId = msg.chat.id;
-  const fileId = msg.photo[msg.photo.length - 1].file_id;
-  const file = await bot.getFile(fileId);
+  
+  const { chatId, batchFolder:folder, localPaths } = await processImageBatch(bot, msg);
+  const uploadFolder = createFolder(`${Date.now()}`,process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
 
-  const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-  const folder = path.join("downloads", String(chatId));
-  await fs.ensureDir(folder);
+  localPaths.forEach(async (localPath) => {
+    try {
+      const hasPerson = await detectPerson(localPath);
+      const ocrText = await extractLargestText(localPath);
+  
+      const parsedDate = parseDateTimeFromText(ocrText) || new Date(); // fallback to system time
+      const newName = formatFileName(parsedDate, parsedDate.getMinutes(), ocrText, hasPerson);
 
-  const localPath = path.join(folder, `${Date.now()}.jpg`);
-  const res = await fetch(url);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  await fs.writeFile(localPath, buffer);
+      const renamedPath = path.join(folder, newName);
+      await fs.rename(newName, renamedPath);
+  
+      const driveLink = await uploadToDrive(renamedPath, newName);
+      
+    } catch (err) {
+      console.error(err);
+      bot.sendMessage(chatId, "❌ Error processing image");
+    }
 
-  bot.sendMessage(chatId, "📥 Image(s) received, processing...");
-
-  try {
-    const hasPerson = await detectPerson(localPath);
-    const ocrText = await extractLargestText(localPath);
-
-    const now = new Date();
-    // const newName = formatFileName(now, now.getMinutes(), ocrText, hasPerson);
-
-    // Parse OCR text → datetime
-    const parsedDate = parseDateTimeFromText(ocrText) || new Date(); // fallback to system time
-    const newName = formatFileName(parsedDate, parsedDate.getMinutes(), ocrText, hasPerson);
-
-
-    const renamedPath = path.join(folder, newName);
-    await fs.rename(newName, renamedPath);
-
-    const driveLink = await uploadToDrive(renamedPath, newName);
-    bot.sendMessage(chatId, `✅ Processed: *${newName}*\n🔗 [View on Drive](${driveLink})`, { parse_mode: "Markdown" });
-
-  } catch (err) {
-    console.error(err);
-    bot.sendMessage(chatId, "❌ Error processing image");
-  }
+  })
+  
+  const driveLink = `https://drive.google.com/drive/folders/${uploadFolder}`;
+  bot.sendMessage(chatId, `✅ Processed: *${localPaths}*\n🔗 [View on Drive](${driveLink})`, { parse_mode: "Markdown" });
+  
 });
 
 
@@ -153,3 +143,48 @@ function parseDateTimeFromText(text) {
   return new Date(year, month, day, hour, minute);
 }
 
+async function createFolder(name, parentId = null) {
+  const fileMetadata = {
+    name,
+    mimeType: "application/vnd.google-apps.folder",
+  };
+  if (parentId) fileMetadata.parents = [parentId];
+
+  const folder = await drive.files.create({
+    resource: fileMetadata,
+    fields: "id",
+  });
+  return folder.data.id;
+}
+
+
+async function processImageBatch(bot, msg) {
+  const chatId = msg.chat.id;
+
+  // Each "photo" array contains multiple sizes of the same image.
+  // We'll take the highest resolution version for each photo.
+  const photos = msg.photo || [];
+
+  // Create a batch folder for this chat
+  const batchFolder = path.join("downloads", String(chatId), String(Date.now()));
+  await fs.ensureDir(batchFolder);
+
+  const localPaths = [];
+
+  for (let i = 0; i < photos.length; i++) {
+    const fileId = photos[i].file_id;
+    const file = await bot.getFile(fileId);
+
+    const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+    const localPath = path.join(batchFolder, `image_${i + 1}.jpg`);
+
+    const res = await fetch(url);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(localPath, buffer);
+
+    localPaths.push(localPath);
+  }
+
+  console.log(`Downloaded ${localPaths.length} images for chat ${chatId}`);
+  return { chatId, batchFolder, localPaths };
+}
