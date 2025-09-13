@@ -17,7 +17,8 @@
     "fs-extra": "^11.2.0",
     "googleapis": "^144.0.0",
     "node-telegram-bot-api": "^0.64.0",
-    "tesseract.js": "^5.0.5"
+    "tesseract.js": "^5.0.5",
+    "exif-parser":"^0.1.12"
   },
   "engines": {
     "node": "20.x"
