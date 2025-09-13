@@ -88,7 +88,7 @@ bot.on("photo", async (msg) => {
   const buffer = Buffer.from(await res.arrayBuffer());
   await fs.writeFile(localPath, buffer);
 
-  bot.sendMessage(chatId, "📥 Image received, processing...");
+  bot.sendMessage(chatId, "📥 Image(s) received, processing...");
 
   try {
     const hasPerson = await detectPerson(localPath);
@@ -103,7 +103,7 @@ bot.on("photo", async (msg) => {
 
 
     const renamedPath = path.join(folder, newName);
-    await fs.rename(localPath, renamedPath);
+    await fs.rename(newName, renamedPath);
 
     const driveLink = await uploadToDrive(renamedPath, newName);
     bot.sendMessage(chatId, `✅ Processed: *${newName}*\n🔗 [View on Drive](${driveLink})`, { parse_mode: "Markdown" });
