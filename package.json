@@ -1,0 +1,22 @@
+{
+  "name": "telegram-image-processor",
+  "version": "1.0.0",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.2",
+    "@tensorflow/tfjs-node": "^4.20.0",
+    "canvas": "^2.11.2",
+    "dotenv": "^16.4.5",
+    "fs-extra": "^11.2.0",
+    "googleapis": "^144.0.0",
+    "node-telegram-bot-api": "^0.64.0",
+    "tesseract.js": "^5.0.5"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
