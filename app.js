@@ -8,6 +8,7 @@ import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import { createCanvas, loadImage } from "canvas";
 import Tesseract from "tesseract.js";
 import fetch from "node-fetch"; // ✅ required if Node < 18
+import ExifParser from "exif-parser";
 
 dotenv.config();
 
@@ -53,6 +54,16 @@ async function extractLargestText(imagePath) {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
   return blocks.sort((a, b) => b.length - a.length)[0] || "unknown";
+}
+
+function getPhotoDate(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const parser = ExifParser.create(buffer);
+  const result = parser.parse();
+  return  result.tags.DateTimeOriginal
+  ? new Date(result.tags.DateTimeOriginal * 1000) // convert seconds → ms
+  : null;
+
 }
 
 // --- Rename file ---
@@ -112,12 +123,9 @@ bot.on("photo", async (msg) => {
 
     for (const localPath of localPaths) {
       try {
-        const hasPerson = await detectPerson(localPath);
-        const ocrText = await extractLargestText(localPath);       
-        textDate=parseDateTimeFromText(ocrText) 
-        if(textDate){
-          const { day, month, year, hour, minute} = textDate;
-          const newName = `${hour}.${minute} ${day}${month} ${year}-${hasPerson}`;
+        const photoDate = await getPhotoDate(localPath);      
+        if(photoDate){
+          const newName = `${photoDate.getHours()}.${photoDate.getMinutes()}-${photoDate.getDate()}`;
           const renamedPath = path.join(folder, newName);
           await fs.rename(localPath, renamedPath); // ✅ fixed rename
         }
