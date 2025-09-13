@@ -6,7 +6,7 @@ services:
     buildCommand: yarn install
     startCommand: yarn start
     envVars:
-      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+      - key: GOOGLE_DRIVE_PARENT_FOLDER_ID
         sync: false   # set this in Render Dashboard
       - key: TELEGRAM_BOT_TOKEN
         sync: false   # set this in Render Dashboard
