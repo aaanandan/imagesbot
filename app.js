@@ -218,9 +218,32 @@ async function processImageBatch(msg, photos) {
 }
 
 // ===== TELEGRAM HANDLER =====
+// bot.on("message", async (msg) => {
+//   if (msg.photo) {
+//     await processImageBatch(msg, msg.photo);
+//   }
+// });
+// bot.on("photo", async (msg) => {
+//   if (msg.photo) {
+//     await processImageBatch(msg, msg.photo);
+//   }
+// });
+
+
 bot.on("message", async (msg) => {
-  if (msg.photo) {
-    await processImageBatch(msg, msg.photo);
+  try {
+    console.log('message received..');
+    if (msg.photo) {
+      // normal photo(s)
+      console.log('message has photos..');
+      await processImageBatch(msg, msg.photo);
+    } else if (msg.document && msg.document.mime_type.startsWith("image/")) {
+      // image sent as document
+      console.log('message has documents..');
+      await processImageBatch(msg, [msg.document]);
+    }
+  } catch (err) {
+    console.error("Error processing message:", err);
   }
 });
 
