@@ -4,14 +4,13 @@
   "main": "app.js",
   "type": "module",
     "scripts": {
-      "start": "node index.js"
+      "start": "node app.js"
     },
     "license": "MIT",   
-    "author": "Anand",
     "keywords": ["telegram", "image", "processor"],
     "dependencies": {
     "@tensorflow/tfjs-node": "^4.18.0",
-    "@vladmandic/human": "^3.6.0",
+    "@vladmandic/human": "^3.3.6",
     "canvas": "^2.11.2",
     "dotenv": "^16.4.5",
     "exif-parser": "^0.1.12",
