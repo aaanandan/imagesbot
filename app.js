@@ -6,6 +6,7 @@ import fetch from "node-fetch";
 import ExifParser from "exif-parser";
 import Tesseract from "tesseract.js";
 import * as Human from "@vladmandic/human";
+import http from "http";
 
 // ===== CONFIG =====
 const TELEGRAM_TOKEN = process.env.YOUR_TELEGRAM_BOT_TOKEN;
