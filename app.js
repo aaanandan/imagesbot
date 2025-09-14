@@ -9,6 +9,7 @@ import { createCanvas, loadImage } from "canvas";
 import Tesseract from "tesseract.js";
 import fetch from "node-fetch"; // ✅ required if Node < 18
 import ExifParser from "exif-parser";
+import http from "http";
 
 dotenv.config();
 
@@ -265,3 +266,15 @@ async function deleteFolder(folderPath) {
     console.error(`Error deleting folder ${folderPath}:`, err);
   }
 }
+
+
+const PORT = process.env.PORT || 3000;
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Hello! Your Node.js HTTP server is running.\n");
+});
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}/`);
+});
