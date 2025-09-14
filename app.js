@@ -10,6 +10,7 @@ import Tesseract from "tesseract.js";
 import fetch from "node-fetch"; // ✅ required if Node < 18
 import ExifParser from "exif-parser";
 import http from "http";
+import { text } from "stream/consumers";
 
 dotenv.config();
 
@@ -124,12 +125,20 @@ bot.on("photo", async (msg) => {
 
     for (const localPath of localPaths) {
       try {
-        const photoDate = await getPhotoDate(localPath);      
+        const photoDate = await getPhotoDate(localPath);    
+        let renamedPath = localPath;
         if(photoDate){
-          const newName = `${photoDate.getHours()}.${photoDate.getMinutes()}-${photoDate.getDate()}`;
-          const renamedPath = path.join(folder, newName);
+          const newName = `${photoDate.getHours()}.${photoDate.getMinutes()} ${photoDate.getDay()}${photoDate.getMonth()}${photoDate.getFullYear()}`;
+          renamedPath = path.join(folder, newName);
+          await fs.rename(localPath, renamedPath); // ✅ fixed rename
+        }else{
+          const ocrText = extractLargestText(renamedPath);
+          const { day, month, year, hour, minute} = parseDateTimeFromText(ocrText);
+          const newName = `${hour}.${minute} ${day}${month}${year}`;
+          renamedPath = path.join(folder, newName);
           await fs.rename(localPath, renamedPath); // ✅ fixed rename
         }
+
         const driveLink = await uploadToDrive(
           renamedPath,
           newName,
