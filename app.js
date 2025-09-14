@@ -9,8 +9,8 @@ import * as Human from "@vladmandic/human";
 import http from "http";
 
 // ===== CONFIG =====
-const TELEGRAM_TOKEN = process.env.YOUR_TELEGRAM_BOT_TOKEN;
-const DRIVE_FOLDER_ID =  process.env.DRIVE_FOLDER_ID;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const DRIVE_FOLDER_ID =  process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
 const CREDENTIALS_PATH = "credentials.json"; // service account credentials
 
 // ===== INIT =====
