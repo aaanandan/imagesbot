@@ -12,8 +12,8 @@ import "dotenv/config";
 const __dirname = path.resolve();
 
 // ---- Config ----
-const token = process.env.TELEGRAM_TOKEN;
-const uploadFolder = process.env.GDRIVE_FOLDER_ID;
+const token = process.env.TELEGRAM_BOT_TOKEN;
+const uploadFolder = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
 const bot = new TelegramBot(token, { polling: true });
 let model; // coco-ssd model cache
 const albumStore = {}; // temporary store for albums
