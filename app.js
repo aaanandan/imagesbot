@@ -132,12 +132,12 @@ async function processImageBatch(msg, photos) {
     renamedPath = path.join(batchFolder, newName);
     await fs.rename(localPath, renamedPath);
 
-    const hasPerson = await detectPerson(renamedPath);
+    // const hasPerson = await detectPerson(renamedPath);
 
     const driveLink = await uploadToDrive(renamedPath, newName, uploadFolder);
     await bot.sendMessage(
       msg.chat.id,
-      `✅ Processed: *${newName}*\n👤 Person detected: ${hasPerson ? "Yes" : "No"}\n🔗 [View on Drive](${driveLink})`,
+      `✅ Processed: *${newName}*\n🔗 [View on Drive](${driveLink})`,
       { parse_mode: "Markdown" }
     );
   });
