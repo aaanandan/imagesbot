@@ -151,36 +151,71 @@ async function processImageBatch(msg, photos) {
 }
 
 // ---- Telegram Listener ----
-bot.on("message", async (msg) => {
-  try {
-    console.log("📩 Message received..");
+// bot.on("message", async (msg) => {
+//   try {
+//     console.log("📩 Message received..");
 
-    if (msg.photo) {
-      const bestPhoto = msg.photo[msg.photo.length - 1];
-      if (msg.media_group_id) {
-        if (!albumStore[msg.media_group_id]) {
-          albumStore[msg.media_group_id] = [];
-        }
-        albumStore[msg.media_group_id].push(bestPhoto);
+//     if (msg.photo) {
+//       const bestPhoto = msg.photo[msg.photo.length - 1];
+//       if (msg.media_group_id) {
+//         if (!albumStore[msg.media_group_id]) {
+//           albumStore[msg.media_group_id] = [];
+//         }
+//         albumStore[msg.media_group_id].push(bestPhoto);
 
-        setTimeout(async () => {
-          const batch = albumStore[msg.media_group_id];
-          if (batch && batch.length > 0) {
-            console.log(`📸 Processing album ${msg.media_group_id} (${batch.length} photos)`);
-            await processImageBatch(msg, batch);
-            delete albumStore[msg.media_group_id];
-          }
-        }, 5000);
-      } else {
-        await processImageBatch(msg, [bestPhoto]);
-      }
-    } else if (msg.document && msg.document.mime_type.startsWith("image/")) {
-      await processImageBatch(msg, [msg.document]);
+//         setTimeout(async () => {
+//           const batch = albumStore[msg.media_group_id];
+//           if (batch && batch.length > 0) {
+//             console.log(`📸 Processing album ${msg.media_group_id} (${batch.length} photos)`);
+//             await processImageBatch(msg, batch);
+//             delete albumStore[msg.media_group_id];
+//           }
+//         }, 5000);
+//       } else {
+//         await processImageBatch(msg, [bestPhoto]);
+//       }
+//     } else if (msg.document && msg.document.mime_type.startsWith("image/")) {
+//       await processImageBatch(msg, [msg.document]);
+//     }
+//   } catch (err) {
+//     console.error("❌ Error processing message:", err);
+//     await bot.sendMessage(msg.chat.id, "❌ Failed to process image(s).");
+//   }
+// });
+
+// Add a cache for album grouping
+const albumCache = new Map();
+
+bot.on("photo", async (msg) => {
+  const chatId = msg.chat.id;
+  const mediaGroupId = msg.media_group_id;
+
+  if (mediaGroupId) {
+    // Collect photos for this album
+    if (!albumCache.has(mediaGroupId)) {
+      albumCache.set(mediaGroupId, []);
     }
-  } catch (err) {
-    console.error("❌ Error processing message:", err);
-    await bot.sendMessage(msg.chat.id, "❌ Failed to process image(s).");
+    albumCache.get(mediaGroupId).push(msg);
+
+    // Wait a short time before processing (to collect all photos)
+    setTimeout(async () => {
+      if (albumCache.has(mediaGroupId)) {
+        const albumPhotos = albumCache.get(mediaGroupId);
+        albumCache.delete(mediaGroupId);
+
+        console.log(`📸 Processing album ${mediaGroupId} (${albumPhotos.length} photos)`);
+
+        // 👉 process all photos here together
+        for (const photoMsg of albumPhotos) {
+          await processPhoto(photoMsg, chatId);
+        }
+      }
+    }, 1000); // 1s delay to ensure all photos in album arrive
+  } else {
+    // Single photo → process immediately
+    await processPhoto(msg, chatId);
   }
 });
+
 
 console.log("🤖 Bot started...");
