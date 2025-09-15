@@ -1,281 +1,186 @@
-import TelegramBot from "node-telegram-bot-api";
-import fs from "fs";
+import fs from "fs-extra";
 import path from "path";
-import { google } from "googleapis";
 import fetch from "node-fetch";
-import ExifParser from "exif-parser";
-import Tesseract from "tesseract.js";
-import * as Human from "@vladmandic/human";
-import http from "http";
+import TelegramBot from "node-telegram-bot-api";
+import { google } from "googleapis";
+import * as exifParser from "exif-parser";
+import tesseract from "tesseract.js";
+import * as cocoSsd from "@tensorflow-models/coco-ssd";
+import * as tf from "@tensorflow/tfjs-node";
+import "dotenv/config";
 
-// ===== CONFIG =====
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const DRIVE_FOLDER_ID =  process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
-const CREDENTIALS_PATH = "credentials.json"; // service account credentials
+const __dirname = path.resolve();
 
-// ===== INIT =====
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+// ---- Config ----
+const token = process.env.TELEGRAM_TOKEN;
+const uploadFolder = process.env.GDRIVE_FOLDER_ID;
+const bot = new TelegramBot(token, { polling: true });
+let model; // coco-ssd model cache
+const albumStore = {}; // temporary store for albums
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: CREDENTIALS_PATH,
-  scopes: ["https://www.googleapis.com/auth/drive.file"],
-});
-const drive = google.drive({ version: "v3", auth });
-
-// Human config (lightweight person detection)
-const human = new Human.Human({
-  modelBasePath: "https://vladmandic.github.io/human/models/",
-  face: { enabled: true },
-  body: { enabled: true },
-});
-
-// ===== HELPERS =====
-const pad2 = (n) => String(n).padStart(2, "0");
-
-function parseDateTimeFromText(text) {
-  if (!text) return null;
-
-  const clean = String(text).toLowerCase();
-  const dateRegex = /(\d{1,2})[\/\-\. ](\d{1,2})(?:[\/\-\. ](\d{2,4}))?/;
-  const timeRegex = /(\d{1,2}):(\d{2})(?::(\d{2}))?/;
-
-  const dateMatch = clean.match(dateRegex);
-  const timeMatch = clean.match(timeRegex);
-
-  if (!dateMatch) return null;
-
-  let day = parseInt(dateMatch[1]);
-  let month = parseInt(dateMatch[2]) - 1;
-  let year = dateMatch[3] ? parseInt(dateMatch[3]) : new Date().getFullYear();
-
-  let hour = timeMatch ? parseInt(timeMatch[1]) : 0;
-  let minute = timeMatch ? parseInt(timeMatch[2]) : 0;
-
-  if (year < 100) year += 2000;
-
-  return new Date(year, month, day, hour, minute);
+// ---- Helpers ----
+function pad2(n) {
+  return String(n).padStart(2, "0");
 }
 
-async function extractExifDate(filePath) {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    const parser = ExifParser.create(buffer);
-    const result = parser.parse();
-    return result.tags.DateTimeOriginal
-      ? new Date(result.tags.DateTimeOriginal * 1000)
-      : null;
-  } catch {
-    return null;
+async function loadModel() {
+  if (!model) {
+    model = await cocoSsd.load();
+    console.log("✅ COCO-SSD model loaded");
   }
+  return model;
 }
 
-async function extractOcrText(filePath) {
+async function detectPerson(imagePath) {
   try {
-    const { data } = await Tesseract.recognize(filePath, "eng");
-    return data.text.trim().replace(/\s+/g, " ").slice(0, 30); // keep suffix short
-  } catch {
-    return null;
-  }
-}
-
-async function detectPerson(filePath) {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    const result = await human.detect(buffer);
-
-    const hasPerson =
-      (result.face && result.face.length > 0) ||
-      (result.body && result.body.length > 0);
-
-    return hasPerson;
-  } catch {
+    const mdl = await loadModel();
+    const img = fs.readFileSync(imagePath);
+    const decoded = tf.node.decodeImage(img, 3);
+    const preds = await mdl.detect(decoded);
+    decoded.dispose();
+    return preds.some((p) => p.class === "person" && p.score > 0.5);
+  } catch (err) {
+    console.error("⚠️ Person detection failed", err);
     return false;
   }
 }
 
-async function uploadToDrive(filePath, fileName) {
-  const fileMetadata = {
-    name: fileName,
-    parents: [DRIVE_FOLDER_ID],
-  };
-  const media = {
-    mimeType: "image/jpeg",
-    body: fs.createReadStream(filePath),
-  };
-
-  const file = await drive.files.create({
-    resource: fileMetadata,
-    media,
-    fields: "id, webViewLink",
-  });
-
-  return file.data.webViewLink;
-}
-
-// ===== CORE =====
-async function processImages(localPaths, messageText) {
-  return await Promise.allSettled(
-    localPaths.map(async (localPath) => {
-      let finalDate = null;
-
-      // 1. Try EXIF
-      finalDate = await extractExifDate(localPath);
-
-      // 2. Try OCR if no EXIF
-      let ocrText = "";
-      if (!finalDate) {
-        ocrText = await extractOcrText(localPath);
-        finalDate = parseDateTimeFromText(ocrText);
-      }
-
-      // 3. Try message text if still missing
-      if (!finalDate) {
-        finalDate = parseDateTimeFromText(messageText);
-      }
-
-      // 4. Default now
-      if (!finalDate) {
-        finalDate = new Date();
-      }
-
-      const year = finalDate.getFullYear();
-      const month = finalDate.getMonth();
-      const day = finalDate.getDate();
-      const hour = finalDate.getHours();
-      const minute = finalDate.getMinutes();
-
-      // Person detection
-      const hasPerson = await detectPerson(localPath);
-
-      // Always force JPG
-      const newName = `${pad2(hour)}.${pad2(minute)}_${pad2(day)}${pad2(
-        month + 1
-      )}${year}${
-        ocrText ? "_" + ocrText.replace(/[^a-zA-Z0-9]/g, "") : ""
-      }${!hasPerson ? "_NoPerson" : ""}.jpg`;
-
-      const tempJpg = localPath + ".jpg";
-
-      // Ensure it's saved as JPG for upload
-      fs.copyFileSync(localPath, tempJpg);
-
-      const link = await uploadToDrive(tempJpg, newName);
-
-      // Cleanup
-      fs.unlinkSync(localPath);
-      fs.unlinkSync(tempJpg);
-
-      return { file: newName, link, hasPerson };
-    })
-  );
-}
-
-async function processImageBatch(msg, photos) {
-  const batchFolder = `temp_${msg.message_id}`;
-  fs.mkdirSync(batchFolder, { recursive: true });
-  console.log('images folder created....',batchFolder);
-
+async function getPhotoDate(localPath) {
   try {
-    const downloads = photos.map(async (photo, i) => {
-      const fileId = photo.file_id;
-      console.log(fileId);
-      const file = await bot.getFile(fileId);
-      const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
-      console.log(fileUrl);
-      ////
-      // const file = await bot.getFile(fileId);
-      // const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      // const folder = path.join("downloads", String(chatId));
-      // const localPath = path.join(folder, `${Date.now()}.jpg`);
-      // const res = await fetch(url);
-      // const buffer = Buffer.from(await res.arrayBuffer());
-      // await fs.writeFile(localPath, buffer);
-      ////
-
-      const res = await fetch(fileUrl);
-      const buffer = Buffer.from(await res.arrayBuffer());
-
-      const ext = path.extname(file.file_path) || ".jpg";
-      const localPath = path.join(batchFolder, `image_${i + 1}${ext}`);
-      fs.writeFileSync(localPath, buffer);
-      return localPath;
-    });
-
-    console.log('downloads',downloads);
-    const localPaths = await Promise.all(downloads);
-    const results = await processImages(localPaths, msg.caption || msg.text);
-
-    const success = results
-      .filter((r) => r.status === "fulfilled")
-      .map((r) => r.value);
-
-    if (success.length) {
-      const links = success
-        .map(
-          (s) =>
-            `${s.hasPerson ? "✅ Person" : "⚠️ No Person"} — *${s.file}*\n🔗 ${
-              s.link
-            }`
-        )
-        .join("\n\n");
-
-      await bot.sendMessage(msg.chat.id, `📂 Processed:\n\n${links}`, {
-        parse_mode: "Markdown",
-      });
-    } else {
-      await bot.sendMessage(msg.chat.id, "❌ No images processed.");
+    const buffer = await fs.readFile(localPath);
+    const parser = exifParser.create(buffer);
+    const exif = parser.parse();
+    if (exif.tags && exif.tags.DateTimeOriginal) {
+      return new Date(exif.tags.DateTimeOriginal * 1000);
     }
-  } finally {
-    fs.rmSync(batchFolder, { recursive: true, force: true });
+  } catch (err) {
+    console.error("No EXIF date", err);
+  }
+  return null;
+}
+
+async function extractLargestText(imagePath) {
+  try {
+    const { data: { text } } = await tesseract.recognize(imagePath, "eng");
+    return text.trim().split(/\n+/).sort((a, b) => b.length - a.length)[0] || "";
+  } catch (err) {
+    console.error("OCR failed", err);
+    return "";
   }
 }
 
+function parseDateTimeFromText(text) {
+  const now = new Date();
+  // fallback values
+  return {
+    day: pad2(now.getDate()),
+    month: pad2(now.getMonth() + 1),
+    year: now.getFullYear(),
+    hour: pad2(now.getHours()),
+    minute: pad2(now.getMinutes())
+  };
+}
 
+async function uploadToDrive(filePath, newName, folderId) {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: process.env.GDRIVE_KEY_FILE,
+    scopes: ["https://www.googleapis.com/auth/drive.file"],
+  });
+  const drive = google.drive({ version: "v3", auth });
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: newName,
+      parents: [folderId],
+    },
+    media: {
+      mimeType: "image/jpeg",
+      body: fs.createReadStream(filePath),
+    },
+    fields: "id",
+  });
+  return `https://drive.google.com/file/d/${res.data.id}/view`;
+}
+
+// ---- Core Processing ----
+async function processImageBatch(msg, photos) {
+  const batchFolder = `temp_${msg.message_id}`;
+  await fs.mkdir(batchFolder, { recursive: true });
+  console.log("📂 Created temp folder:", batchFolder);
+
+  const tasks = photos.map(async (photo, i) => {
+    const fileId = photo.file_id;
+    const fileLink = await bot.getFileLink(fileId);
+    const localPath = path.join(batchFolder, `photo_${i}.jpg`);
+    const res = await fetch(fileLink);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(localPath, buffer);
+
+    let newName;
+    let renamedPath = localPath;
+
+    const photoDate = await getPhotoDate(localPath);
+    if (photoDate) {
+      newName = `${pad2(photoDate.getHours())}.${pad2(photoDate.getMinutes())} ${pad2(photoDate.getDate())}${pad2(photoDate.getMonth() + 1)}${photoDate.getFullYear()}.jpg`;
+    } else {
+      const ocrText = await extractLargestText(localPath);
+      const { day, month, year, hour, minute } = parseDateTimeFromText(ocrText);
+      const safeOcr = ocrText.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20);
+      newName = `${hour}.${minute} ${day}${month}${year}_${safeOcr}.jpg`;
+    }
+
+    renamedPath = path.join(batchFolder, newName);
+    await fs.rename(localPath, renamedPath);
+
+    const hasPerson = await detectPerson(renamedPath);
+
+    const driveLink = await uploadToDrive(renamedPath, newName, uploadFolder);
+    await bot.sendMessage(
+      msg.chat.id,
+      `✅ Processed: *${newName}*\n👤 Person detected: ${hasPerson ? "Yes" : "No"}\n🔗 [View on Drive](${driveLink})`,
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  await Promise.allSettled(tasks);
+
+  const driveLink = `https://drive.google.com/drive/folders/${uploadFolder}`;
+  await bot.sendMessage(msg.chat.id, `📂 All images uploaded: ${driveLink}`);
+  await fs.remove(batchFolder);
+  console.log("🧹 Temp folder cleaned:", batchFolder);
+}
+
+// ---- Telegram Listener ----
 bot.on("message", async (msg) => {
   try {
-    console.log("message received..");
+    console.log("📩 Message received..");
 
     if (msg.photo) {
-      console.log("message has photos..");
-
-      // always take only the largest size for this photo
       const bestPhoto = msg.photo[msg.photo.length - 1];
-
       if (msg.media_group_id) {
-        // collect multiple photos if they come as an album
         if (!albumStore[msg.media_group_id]) {
           albumStore[msg.media_group_id] = [];
         }
         albumStore[msg.media_group_id].push(bestPhoto);
 
-        // wait a little before processing the full batch
         setTimeout(async () => {
           const batch = albumStore[msg.media_group_id];
           if (batch && batch.length > 0) {
-            console.log(
-              `Processing album ${msg.media_group_id} with ${batch.length} photos`
-            );
+            console.log(`📸 Processing album ${msg.media_group_id} (${batch.length} photos)`);
             await processImageBatch(msg, batch);
-            delete albumStore[msg.media_group_id]; // cleanup
+            delete albumStore[msg.media_group_id];
           }
         }, 5000);
       } else {
-        // single photo message
         await processImageBatch(msg, [bestPhoto]);
       }
     } else if (msg.document && msg.document.mime_type.startsWith("image/")) {
-      console.log("message has documents..");
       await processImageBatch(msg, [msg.document]);
     }
   } catch (err) {
-    console.error("Error processing message:", err);
+    console.error("❌ Error processing message:", err);
     await bot.sendMessage(msg.chat.id, "❌ Failed to process image(s).");
   }
 });
 
-
-
-const PORT = process.env.PORT || 3000; 
-const server = http.createServer((req, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); 
-res.end("Hello! Your Node.js HTTP server is running.\n"); }); 
-server.listen(PORT, () => { console.log(`🚀 Server running at http:// localhost:${PORT}`); });
+console.log("🤖 Bot started...");

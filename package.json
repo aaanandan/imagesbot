@@ -1,26 +1,22 @@
 {
-  "name": "telegram-image-processor",
+  "name": "telegram-photo-bot",
   "version": "1.0.0",
+  "description": "Telegram bot to process photos: OCR, person detection, Google Drive upload",
   "main": "app.js",
   "type": "module",
-    "scripts": {
-      "start": "node app.js"
-    },
-    "license": "MIT",   
-    "keywords": ["telegram", "image", "processor"],
-    "dependencies": {
-    "@tensorflow/tfjs-node": "^4.18.0",
-    "@vladmandic/human": "^3.3.6",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.2",
+    "@tensorflow/tfjs-node": "^4.20.0",
     "canvas": "^2.11.2",
     "dotenv": "^16.4.5",
     "exif-parser": "^0.1.12",
     "fs-extra": "^11.2.0",
-    "googleapis": "^135.0.0",
+    "googleapis": "^144.0.0",
     "node-fetch": "^3.3.2",
-    "node-telegram-bot-api": "^0.64.0",
+    "node-telegram-bot-api": "^0.66.0",
     "tesseract.js": "^5.1.0"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
