@@ -173,15 +173,27 @@ async function processImages(localPaths, messageText) {
 async function processImageBatch(msg, photos) {
   const batchFolder = `temp_${msg.message_id}`;
   fs.mkdirSync(batchFolder, { recursive: true });
+  console.log('images folder created....',batchFolder);
 
   try {
     const downloads = photos.map(async (photo, i) => {
       const fileId = photo.file_id;
+      console.log(fileId);
       const file = await bot.getFile(fileId);
       const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`;
+      console.log(fileUrl);
+      ////
+      // const file = await bot.getFile(fileId);
+      // const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+      // const folder = path.join("downloads", String(chatId));
+      // const localPath = path.join(folder, `${Date.now()}.jpg`);
+      // const res = await fetch(url);
+      // const buffer = Buffer.from(await res.arrayBuffer());
+      // await fs.writeFile(localPath, buffer);
+      ////
 
       const res = await fetch(fileUrl);
-      const buffer = await res.buffer();
+      const buffer = Buffer.from(await res.arrayBuffer());
 
       const ext = path.extname(file.file_path) || ".jpg";
       const localPath = path.join(batchFolder, `image_${i + 1}${ext}`);
@@ -189,6 +201,7 @@ async function processImageBatch(msg, photos) {
       return localPath;
     });
 
+    console.log('downloads',downloads);
     const localPaths = await Promise.all(downloads);
     const results = await processImages(localPaths, msg.caption || msg.text);
 
@@ -216,18 +229,6 @@ async function processImageBatch(msg, photos) {
     fs.rmSync(batchFolder, { recursive: true, force: true });
   }
 }
-
-// ===== TELEGRAM HANDLER =====
-// bot.on("message", async (msg) => {
-//   if (msg.photo) {
-//     await processImageBatch(msg, msg.photo);
-//   }
-// });
-// bot.on("photo", async (msg) => {
-//   if (msg.photo) {
-//     await processImageBatch(msg, msg.photo);
-//   }
-// });
 
 
 bot.on("message", async (msg) => {
