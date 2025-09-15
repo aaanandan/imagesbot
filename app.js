@@ -233,20 +233,46 @@ async function processImageBatch(msg, photos) {
 
 bot.on("message", async (msg) => {
   try {
-    console.log('message received..');
+    console.log("message received..");
+
     if (msg.photo) {
-      // normal photo(s)
-      console.log('message has photos..');
-      await processImageBatch(msg, msg.photo);
+      console.log("message has photos..");
+
+      // always take only the largest size for this photo
+      const bestPhoto = msg.photo[msg.photo.length - 1];
+
+      if (msg.media_group_id) {
+        // collect multiple photos if they come as an album
+        if (!albumStore[msg.media_group_id]) {
+          albumStore[msg.media_group_id] = [];
+        }
+        albumStore[msg.media_group_id].push(bestPhoto);
+
+        // wait a little before processing the full batch
+        setTimeout(async () => {
+          const batch = albumStore[msg.media_group_id];
+          if (batch && batch.length > 0) {
+            console.log(
+              `Processing album ${msg.media_group_id} with ${batch.length} photos`
+            );
+            await processImageBatch(msg, batch);
+            delete albumStore[msg.media_group_id]; // cleanup
+          }
+        }, 5000);
+      } else {
+        // single photo message
+        await processImageBatch(msg, [bestPhoto]);
+      }
     } else if (msg.document && msg.document.mime_type.startsWith("image/")) {
-      // image sent as document
-      console.log('message has documents..');
+      console.log("message has documents..");
       await processImageBatch(msg, [msg.document]);
     }
   } catch (err) {
     console.error("Error processing message:", err);
+    await bot.sendMessage(msg.chat.id, "❌ Failed to process image(s).");
   }
 });
+
 
 
 const PORT = process.env.PORT || 3000; 
